@@ -112,7 +112,9 @@ berikut adalah hasil evaluasi yang didapat pada model machine learning yang tela
 
 ## Business Dashboard
 
-Business dashboard yang telah dibuat menggunakan Looker Studio dengan dashboard yang dibuat adalah dashboard interaktif. Anda dapat melihat dashboard yang telah dibuat dengan klik pada [Link ini](https://lookerstudio.google.com/reporting/1fecd217-db7b-4c9f-a23b-cfe5bb29e6aa)
+Business dashboard yang telah dibuat menjadi satu dengan sistem machine learning. Anda dapat melihat dashboard yang telah dibuat dengan klik pada [Link ini](https://student-statuss.streamlit.app/) dan pilih pada side **dashboard**.
+
+<center><img src="images\dashboard.png" alt="alt text" width="whatever" height="whatever"></center>
 
 ## Menjalankan Sistem Machine Learning
 
@@ -123,7 +125,9 @@ Business dashboard yang telah dibuat menggunakan Looker Studio dengan dashboard 
 streamlit run app.py
 ```
 
-4. Atau bisa klik [link ini](https://data-science-project-solving-educational-institution-problems.streamlit.app/) untuk mengakses aplikasi secara real-time dari streamlit
+4. Atau bisa klik [Link ini](https://student-statuss.streamlit.app/) untuk mengakses aplikasi secara real-time dari streamlit dan pastikan memilih side **prediksi** seperti pada gambar dibawah.
+
+<center><img src="images\prediksi.png" alt="alt text" width="whatever" height="whatever"></center>
 
 ## Conclusion:
 

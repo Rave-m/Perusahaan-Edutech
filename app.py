@@ -1,27 +1,17 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
+import joblib
 import plotly.express as px
 import plotly.graph_objects as go
-import joblib
+from plotly.subplots import make_subplots
 
-# Load model
+# Load model and data
 model = joblib.load('model/rf_model.pkl')
-
-# Page Configuration
-st.set_page_config(page_title="Student Status Prediction", layout="wide")
-
-# Load data
 data = pd.read_csv("data/data_students.csv", delimiter=",")
 
-# Add Status columns for easier filtering
-data['Status_0'] = (data['Status'] == 0).astype(int)  # Dropout
-data['Status_1'] = (data['Status'] == 1).astype(int)  # Enrolled
-data['Status_2'] = (data['Status'] == 2).astype(int)  # Graduated
-data['Status_New'] = (data['Status'] > 0).astype(int)  # Not Dropout (Enrolled or Graduated)
-
-# Course mapping
-category_mapping = {
+# Map course codes to names
+course_mapping = {
     33: 'Biofuel Production Technologies',
     171: 'Animation and Multimedia Design',
     8014: 'Social Service (evening attendance)',
@@ -40,388 +30,453 @@ category_mapping = {
     9853: 'Basic Education',
     9991: 'Management (evening attendance)'
 }
-data['Course_Label'] = data['Course'].replace(category_mapping)
+data['Course_Name'] = data['Course'].map(course_mapping)
+
+# UI Setup
+st.set_page_config(page_title="Mahasiswa Analytics", layout="wide")
 
 # Sidebar for navigation
-st.sidebar.title("Navigation")
-page = st.sidebar.radio("Select page:", ["Dashboard", "Prediction"])
+st.sidebar.title("📋 Menu Navigasi")
+page = st.sidebar.radio("Pilih Halaman:", ["📊 Dashboard", "🔮 Prediksi"])
+st.sidebar.markdown("---")
 
-# Helper functions
-def add_rating(content):
-    return f"""
-        <div style='
-            height: auto;
-            border: 2px solid #ccc;
-            border-radius: 5px;
-            font-size: 25px;
-            padding-bottom: 38px;
-            padding-top: 38px;
-            background-color: #fffff;
-            text-align: center;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            '>{content}</div>
-        """
+# Author info in sidebar
+st.sidebar.markdown("### 👨‍💻 Developed by")
+st.sidebar.info("Wahid Hasim")
+st.sidebar.markdown("---")
 
-def add_card(content):
-    return f"""
-        <div style='
-            height: auto;
-            font-size: auto;
-            border: 2px solid #ccc;
-            border-radius: 5px;
-            padding: 10px;
-            margin-bottom: 10px;
-            background-color: #fffff;
-            text-align: center;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            line-height: 70px;
-            '>{content}</div>
-        """
+# Functions for dashboard visualizations
+def create_status_distribution(df):
+    # Status distribution
+    status_counts = df['Status'].value_counts().reset_index()
+    status_counts.columns = ['Status', 'Count']
+    
+    # Translate status
+    status_mapping = {'Dropout': 'Dropout', 'Graduate': 'Lulus', 'Enrolled': 'Terdaftar'}
+    status_counts['Status'] = status_counts['Status'].map(status_mapping)
+    
+    fig = px.pie(
+        status_counts, 
+        values='Count', 
+        names='Status', 
+        title='Distribusi Status Mahasiswa',
+        color='Status',
+        color_discrete_map={
+            'Dropout': '#FF6B6B', 
+            'Terdaftar': '#4ECDC4', 
+            'Lulus': '#59CD90'
+        },
+        hole=0.4
+    )
+    fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+    return fig
 
-def create_pie_chart(column, title):
-    try:
-        value_counts = filtered_data[column].value_counts()
-        if len(value_counts) > 1:
-            names = [False, True]
-        else:
-            if value_counts.index[0] == 1:
-                names = [True]
-            else:
-                names = [False]
-        colors = ['white', '#393939']
-        fig = px.pie(
-            values=value_counts,
-            names=names,
-            title=title,
-            color_discrete_sequence=colors)
-        fig.update_layout(
-            height=200,
-            margin=dict(l=0, r=10, t=70, b=10),
-            title=dict(
-                x=0,
-                font=dict(size=15),
-            ),
-        )
-        st.plotly_chart(fig)
-    except (UnboundLocalError, IndexError) as e:
-        st.write("No data available to display.")
+def create_course_success_rate(df):
+    # Group by course and calculate percentage of graduates, enrollees and dropouts
+    course_stats = df.groupby(['Course_Name', 'Status']).size().unstack().fillna(0)
+    
+    if 'Graduate' not in course_stats.columns:
+        course_stats['Graduate'] = 0
+    if 'Dropout' not in course_stats.columns:
+        course_stats['Dropout'] = 0
+    if 'Enrolled' not in course_stats.columns:
+        course_stats['Enrolled'] = 0
+    
+    # Calculate total and success rate
+    course_stats['Total'] = course_stats.sum(axis=1)
+    course_stats['Success_Rate'] = ((course_stats['Graduate'] + course_stats['Enrolled']) / course_stats['Total'] * 100)
+    
+    # Sort by success rate
+    course_stats = course_stats.sort_values('Success_Rate', ascending=True).reset_index().tail(10)
+    
+    fig = px.bar(
+        course_stats,
+        x='Success_Rate',
+        y='Course_Name',
+        orientation='h',
+        title='Top 10 Program Studi dengan Tingkat Kesuksesan Tertinggi',
+        labels={'Success_Rate': 'Tingkat Kesuksesan (%)', 'Course_Name': 'Program Studi'},
+        color_discrete_sequence=['#4ECDC4']
+    )
+    return fig
 
-# Dashboard Page
-if page == "Dashboard":
-    st.title('Student Performance Dashboard')
-    st.markdown("---")
+def create_age_distribution(df):
+    # Age distribution by status
+    age_status = df[['Age_at_enrollment', 'Status']].copy()
     
-    # Filters section
-    st.subheader("Filters")
-    col1, col2, col3, col4 = st.columns(4)
+    # Translate status
+    status_mapping = {'Dropout': 'Dropout', 'Graduate': 'Lulus', 'Enrolled': 'Terdaftar'}
+    age_status['Status'] = age_status['Status'].map(status_mapping)
     
-    with col1:
-        status_options = ['All', 'Dropout', 'Enrolled', 'Graduated']
-        selected_status = st.selectbox('Status', status_options)
+    fig = px.histogram(
+        age_status, 
+        x='Age_at_enrollment', 
+        color='Status',
+        nbins=20,
+        title='Distribusi Usia berdasarkan Status',
+        labels={'Age_at_enrollment': 'Usia saat Pendaftaran', 'count': 'Jumlah Mahasiswa'},
+        color_discrete_map={
+            'Dropout': '#FF6B6B', 
+            'Terdaftar': '#4ECDC4', 
+            'Lulus': '#59CD90'
+        }
+    )
+    return fig
+
+def create_grade_analysis(df):
+    # Create grade visualization
+    grade_data = df[['Curricular_units_1st_sem_grade', 'Curricular_units_2nd_sem_grade', 'Status']].copy()
+    grade_data['Average_Grade'] = (grade_data['Curricular_units_1st_sem_grade'] + grade_data['Curricular_units_2nd_sem_grade']) / 2
     
-    with col2:
-        course_list = sorted(list(data['Course_Label'].unique()))
-        course_list.insert(0, "All Courses")
-        selected_course = st.selectbox('Course', course_list)
+    # Translate status
+    status_mapping = {'Dropout': 'Dropout', 'Graduate': 'Lulus', 'Enrolled': 'Terdaftar'}
+    grade_data['Status'] = grade_data['Status'].map(status_mapping)
     
-    with col3:
-        time_options = ['All', 'Daytime', 'Evening']
-        selected_time = st.selectbox('Attendance Time', time_options)
+    fig = px.box(
+        grade_data,
+        x='Status',
+        y='Average_Grade',
+        color='Status',
+        title='Distribusi Nilai Rata-rata berdasarkan Status',
+        labels={'Average_Grade': 'Nilai Rata-rata', 'Status': 'Status Mahasiswa'},
+        color_discrete_map={
+            'Dropout': '#FF6B6B', 
+            'Terdaftar': '#4ECDC4', 
+            'Lulus': '#59CD90'
+        }
+    )
+    return fig
+
+def create_economic_impact(df):
+    # Economic pressure score vs status
+    eco_data = df[['Economic_pressure_score', 'Status', 'Debtor']].copy()
     
-    with col4:
-        gender_options = ['All', 'Male', 'Female']
-        selected_gender = st.selectbox('Gender', gender_options)
+    # Translate status
+    status_mapping = {'Dropout': 'Dropout', 'Graduate': 'Lulus', 'Enrolled': 'Terdaftar'}
+    eco_data['Status'] = eco_data['Status'].map(status_mapping)
+    eco_data['Has_Debt'] = eco_data['Debtor'].map({0: 'Tidak Memiliki Hutang', 1: 'Memiliki Hutang'})
+    
+    fig = px.scatter(
+        eco_data, 
+        x='Economic_pressure_score', 
+        y='Status', 
+        color='Has_Debt',
+        title='Pengaruh Tekanan Ekonomi terhadap Status',
+        labels={'Economic_pressure_score': 'Skor Tekanan Ekonomi', 'Status': 'Status Mahasiswa'},
+        color_discrete_sequence=['#4ECDC4', '#FF6B6B']
+    )
+    return fig
+
+def create_scholarship_impact(df):
+    # Scholarship impact
+    scholar_data = df.groupby(['Scholarship_holder', 'Status']).size().unstack().fillna(0)
+    
+    if 'Graduate' not in scholar_data.columns:
+        scholar_data['Graduate'] = 0
+    if 'Dropout' not in scholar_data.columns:
+        scholar_data['Dropout'] = 0
+    if 'Enrolled' not in scholar_data.columns:
+        scholar_data['Enrolled'] = 0
+        
+    # Calculate percentages
+    scholar_data['Total'] = scholar_data.sum(axis=1)
+    for col in ['Graduate', 'Dropout', 'Enrolled']:
+        scholar_data[f'{col}_Pct'] = scholar_data[col] / scholar_data['Total'] * 100
+    
+    # Create data for visualization
+    scholarship_status = []
+    labels = {0: 'Tanpa Beasiswa', 1: 'Dengan Beasiswa'}
+    statuses = {'Graduate': 'Lulus', 'Dropout': 'Dropout', 'Enrolled': 'Terdaftar'}
+    
+    for scholarship in [0, 1]:
+        for status in ['Graduate', 'Dropout', 'Enrolled']:
+            scholarship_status.append({
+                'Scholarship': labels[scholarship],
+                'Status': statuses[status],
+                'Percentage': scholar_data.loc[scholarship, f'{status}_Pct']
+            })
+    
+    scholarship_df = pd.DataFrame(scholarship_status)
+    
+    fig = px.bar(
+        scholarship_df, 
+        x='Scholarship', 
+        y='Percentage', 
+        color='Status',
+        title='Dampak Beasiswa terhadap Status Mahasiswa',
+        labels={'Percentage': 'Persentase (%)', 'Scholarship': 'Status Beasiswa'},
+        color_discrete_map={
+            'Dropout': '#FF6B6B', 
+            'Terdaftar': '#4ECDC4', 
+            'Lulus': '#59CD90'
+        },
+        barmode='group'
+    )
+    return fig
+
+# Fungsi untuk prediksi input user
+def user_input_features():
+    st.markdown("### 📋 Data Mahasiswa")
+    
+    # Tab untuk kategori input yang berbeda
+    tab1, tab2 = st.tabs(["📚 Data Akademik", "👤 Data Personal"])
+    
+    with tab1:
+        st.subheader("Nilai dan Mata Kuliah")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            Admission_grade = st.slider('Nilai Masuk', 0.0, 200.0, 120.0, 0.1, 
+                                    help="Nilai ujian masuk perguruan tinggi")
+            Previous_qualification_grade = st.slider('Nilai Kualifikasi Sebelumnya', 0.0, 200.0, 120.0, 0.1, 
+                                                  help="Nilai dari pendidikan sebelumnya")
+        
+        with col2:
+            Curricular_units_1st_sem_grade = st.slider('Nilai Rata-rata Semester 1', 0.0, 20.0, 10.0, 0.1)
+            Curricular_units_2nd_sem_grade = st.slider('Nilai Rata-rata Semester 2', 0.0, 20.0, 10.0, 0.1)
+        
+        st.markdown("---")
+        
+        with st.expander("📊 Detail Jumlah Mata Kuliah"):
+            col3, col4 = st.columns(2)
+            with col3:
+                Curricular_units_1st_sem_enrolled = st.number_input('Mata Kuliah Terdaftar (Sem 1)', min_value=0, max_value=10, value=6)
+                Curricular_units_1st_sem_approved = st.number_input('Mata Kuliah Lulus (Sem 1)', min_value=0, max_value=10, value=5)
+            with col4:
+                Curricular_units_2nd_sem_enrolled = st.number_input('Mata Kuliah Terdaftar (Sem 2)', min_value=0, max_value=10, value=6)
+                Curricular_units_2nd_sem_approved = st.number_input('Mata Kuliah Lulus (Sem 2)', min_value=0, max_value=10, value=5)
+    
+    with tab2:
+        col5, col6 = st.columns(2)
+        
+        with col5:
+            Age_at_enrollment = st.slider('Usia saat Masuk', 17, 70, 20)
+            Gender = st.radio('Jenis Kelamin', ['Laki-laki', 'Perempuan'])
+            Gender = 1 if Gender == 'Laki-laki' else 0
+            
+        with col6:
+            Application_mode = st.selectbox('Jalur Pendaftaran', 
+                                        options=[1, 17, 15, 39], 
+                                        format_func=lambda x: {1: 'Reguler', 17: 'Khusus', 15: 'Transfer', 39: 'Lainnya'}.get(x, str(x)))
+            Displaced = st.radio('Tinggal di Luar Kota Kampus?', ['Ya', 'Tidak'])
+            Displaced = 1 if Displaced == 'Ya' else 0
+        
+        st.markdown("---")
+        
+        col7, col8 = st.columns(2)
+        with col7:
+            Debtor = st.radio('Memiliki Tunggakan?', ['Ya', 'Tidak'])
+            Debtor = 1 if Debtor == 'Ya' else 0
+            
+        with col8:
+            Tuition_fees_up_to_date = st.radio('SPP Terbayar Tepat Waktu?', ['Ya', 'Tidak'])
+            Tuition_fees_up_to_date = 1 if Tuition_fees_up_to_date == 'Ya' else 0
+            
+        Scholarship_holder = st.radio('Penerima Beasiswa?', ['Ya', 'Tidak'])
+        Scholarship_holder = 1 if Scholarship_holder == 'Ya' else 0
+    
+    # Hitung variabel turunan secara otomatis
+    Total_enrolled_units = Curricular_units_1st_sem_enrolled + Curricular_units_2nd_sem_enrolled
+    Total_approved_unit = Curricular_units_1st_sem_approved + Curricular_units_2nd_sem_approved
+    Approval_rate = (Total_approved_unit / Total_enrolled_units * 100) if Total_enrolled_units > 0 else 0
+    Average_grade = (Curricular_units_1st_sem_grade + Curricular_units_2nd_sem_grade) / 2
+
+    # Tampilkan metrik-metrik perhitungan
+    st.markdown("### 📈 Metrik Performa")
+    col_metrics1, col_metrics2, col_metrics3 = st.columns(3)
+    with col_metrics1:
+        st.metric("Total MK Terdaftar", f"{Total_enrolled_units}")
+    with col_metrics2:
+        st.metric("Total MK Lulus", f"{Total_approved_unit}")
+    with col_metrics3:
+        st.metric("Tingkat Kelulusan", f"{Approval_rate:.1f}%")
+    
+    # Tampilkan gauge untuk rata-rata nilai
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = Average_grade,
+        domain = {'x': [0, 1], 'y': [0, 1]},
+        title = {'text': "Rata-rata Nilai"},
+        gauge = {
+            'axis': {'range': [0, 20]},
+            'bar': {'color': "#5D9A96" if Average_grade >= 10 else "#D2546C"},
+            'steps': [
+                {'range': [0, 10], 'color': "#FFE2E2"},
+                {'range': [10, 15], 'color': "#C9FFE2"},
+                {'range': [15, 20], 'color': "#BAFFC9"}
+            ],
+            'threshold': {
+                'line': {'color': "red", 'width': 4},
+                'thickness': 0.75,
+                'value': 10
+            }
+        }
+    ))
+
+    fig.update_layout(height=250)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Create a DataFrame with feature names to avoid RandomForest feature names error
+    feature_names = [
+        'Curricular_units_2nd_sem_enrolled', 'Curricular_units_2nd_sem_approved', 'Curricular_units_2nd_sem_grade',
+        'Curricular_units_1st_sem_enrolled', 'Curricular_units_1st_sem_approved', 'Curricular_units_1st_sem_grade',
+        'Admission_grade', 'Previous_qualification_grade', 'Age_at_enrollment',
+        'Tuition_fees_up_to_date', 'Scholarship_holder', 'Gender', 'Debtor',
+        'Application_mode', 'Displaced', 'Total_enrolled_units', 'Total_approved_unit', 'Approval_rate', 'Average_grade'
+    ]
+    
+    input_values = [[
+        Curricular_units_2nd_sem_enrolled, Curricular_units_2nd_sem_approved, Curricular_units_2nd_sem_grade,
+        Curricular_units_1st_sem_enrolled, Curricular_units_1st_sem_approved, Curricular_units_1st_sem_grade,
+        Admission_grade, Previous_qualification_grade, Age_at_enrollment,
+        Tuition_fees_up_to_date, Scholarship_holder, Gender, Debtor,
+        Application_mode, Displaced, Total_enrolled_units, Total_approved_unit, Approval_rate, Average_grade
+    ]]
+    
+    features = pd.DataFrame(input_values, columns=feature_names)
+    
+    return features
+
+# Main Application Logic
+if page == "📊 Dashboard":
+    st.title("📊 Dashboard Analisis Mahasiswa")
+    st.write("Visualisasi data performa dan status mahasiswa")
+    
+    # Dashboard filters
+    st.sidebar.header("🔍 Filter Dashboard")
+    
+    # Course filter
+    all_courses = ['Semua Program'] + sorted(data['Course_Name'].unique().tolist())
+    selected_course = st.sidebar.selectbox('Program Studi:', all_courses)
+    
+    # Gender filter
+    gender_options = ['Semua', 'Laki-laki', 'Perempuan']
+    selected_gender = st.sidebar.selectbox('Jenis Kelamin:', gender_options)
+    
+    # Age range filter
+    age_min = int(data['Age_at_enrollment'].min())
+    age_max = int(data['Age_at_enrollment'].max())
+    age_range = st.sidebar.slider(
+        'Rentang Usia:',
+        min_value=age_min, 
+        max_value=age_max, 
+        value=(age_min, age_max)
+    )
     
     # Apply filters
     filtered_data = data.copy()
     
-    if selected_status != 'All':
-        if selected_status == 'Dropout':
-            filtered_data = filtered_data[filtered_data['Status'] == 0]
-        elif selected_status == 'Enrolled':
-            filtered_data = filtered_data[filtered_data['Status'] == 1]
-        elif selected_status == 'Graduated':
-            filtered_data = filtered_data[filtered_data['Status'] == 2]
+    if selected_course != 'Semua Program':
+        filtered_data = filtered_data[filtered_data['Course_Name'] == selected_course]
     
-    if selected_course != 'All Courses':
-        filtered_data = filtered_data[filtered_data['Course_Label'] == selected_course]
+    if selected_gender != 'Semua':
+        gender_map = {'Laki-laki': 1, 'Perempuan': 0}
+        filtered_data = filtered_data[filtered_data['Gender'] == gender_map[selected_gender]]
     
-    if selected_time != 'All':
-        if selected_time == 'Daytime':
-            filtered_data = filtered_data[filtered_data['Daytime_evening_attendance'] == 1]
-        else:
-            filtered_data = filtered_data[filtered_data['Daytime_evening_attendance'] == 0]
+    filtered_data = filtered_data[(filtered_data['Age_at_enrollment'] >= age_range[0]) & 
+                                 (filtered_data['Age_at_enrollment'] <= age_range[1])]
     
-    if selected_gender != 'All':
-        if selected_gender == 'Male':
-            filtered_data = filtered_data[filtered_data['Gender'] == 1]
-        else:
-            filtered_data = filtered_data[filtered_data['Gender'] == 0]
+    # Show filter summary
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(f"**Data yang ditampilkan:** {len(filtered_data)} mahasiswa")
     
-    st.markdown("---")
-    
-    # Overview Section
-    st.subheader("Overview")
-    col1, col2, col3, col4 = st.columns(4)
+    # Key metrics
+    st.markdown("### 📌 Metrik Utama")
     
     total_students = len(filtered_data)
-    dropout_count = sum(filtered_data['Status'] == 0)
-    enrolled_count = sum(filtered_data['Status'] == 1)
-    graduated_count = sum(filtered_data['Status'] == 2)
+    dropout_count = len(filtered_data[filtered_data['Status'] == 'Dropout'])
+    graduate_count = len(filtered_data[filtered_data['Status'] == 'Graduate'])
+    enrolled_count = len(filtered_data[filtered_data['Status'] == 'Enrolled'])
     
-    dropout_rate = dropout_count / total_students * 100 if total_students > 0 else 0
+    dropout_rate = (dropout_count / total_students * 100) if total_students > 0 else 0
+    graduate_rate = (graduate_count / total_students * 100) if total_students > 0 else 0
     
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total Students", f"{total_students}")
+        st.metric("Total Mahasiswa", f"{total_students}")
     with col2:
-        st.metric("Dropout Rate", f"{dropout_rate:.1f}%")
+        st.metric("Tingkat Dropout", f"{dropout_rate:.1f}%")
     with col3:
-        st.metric("Enrolled Students", f"{enrolled_count}")
+        st.metric("Tingkat Kelulusan", f"{graduate_rate:.1f}%")
     with col4:
-        st.metric("Graduated Students", f"{graduated_count}")
+        st.metric("Masih Terdaftar", f"{enrolled_count}")
     
+    # Charts
     st.markdown("---")
     
-    # Visualizations
+    # Row 1: Status distribution & Grade analysis
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("Status Distribution")
-        status_counts = filtered_data['Status'].value_counts().sort_index()
-        status_labels = ['Dropout', 'Enrolled', 'Graduated']
+        fig = create_status_distribution(filtered_data)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        fig = create_grade_analysis(filtered_data)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Row 2: Age distribution & Scholarship impact
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        fig = create_age_distribution(filtered_data)
+        st.plotly_chart(fig, use_container_width=True)
         
-        if not status_counts.empty:
-            fig = px.pie(
-                values=status_counts, 
-                names=[status_labels[i] for i in status_counts.index],
-                title="Student Status Distribution",
-                color_discrete_sequence=['#FF5252', '#4CAF50', '#2196F3']
-            )
-            st.plotly_chart(fig)
-        else:
-            st.write("No data available for selected filters.")
-    
     with col2:
-        st.subheader("Average Grade by Status")
-        try:
-            avg_grades = filtered_data.groupby('Status')[['Curricular_units_1st_sem_grade', 
-                                                        'Curricular_units_2nd_sem_grade']].mean().reset_index()
-            
-            if not avg_grades.empty:
-                avg_grades['Status'] = avg_grades['Status'].replace({0: 'Dropout', 1: 'Enrolled', 2: 'Graduated'})
-                
-                fig = px.bar(
-                    avg_grades,
-                    x='Status',
-                    y=['Curricular_units_1st_sem_grade', 'Curricular_units_2nd_sem_grade'],
-                    barmode='group',
-                    labels={
-                        'value': 'Average Grade',
-                        'variable': 'Semester'
-                    },
-                    title="Average Grades by Student Status",
-                    color_discrete_sequence=['#FFA500', '#9C27B0']
-                )
-                
-                fig.update_layout(legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                ))
-                
-                st.plotly_chart(fig)
-            else:
-                st.write("No data available for selected filters.")
-        except Exception as e:
-            st.write("Error creating visualization:", e)
+        fig = create_scholarship_impact(filtered_data)
+        st.plotly_chart(fig, use_container_width=True)
     
-    # More visualizations
+    # Row 3: Economic impact & Course success rate
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("Age Distribution")
-        try:
-            fig = px.histogram(
-                filtered_data,
-                x='Age_at_enrollment',
-                nbins=20,
-                title='Age at Enrollment Distribution',
-                color_discrete_sequence=['#3F51B5']
-            )
-            st.plotly_chart(fig)
-        except Exception as e:
-            st.write("Error creating visualization:", e)
-    
+        fig = create_economic_impact(filtered_data)
+        st.plotly_chart(fig, use_container_width=True)
+        
     with col2:
-        st.subheader("Scholarship by Status")
-        try:
-            scholarship_by_status = filtered_data.groupby('Status')['Scholarship_holder'].mean().reset_index()
-            
-            if not scholarship_by_status.empty:
-                scholarship_by_status['Status'] = scholarship_by_status['Status'].replace(
-                    {0: 'Dropout', 1: 'Enrolled', 2: 'Graduated'}
-                )
-                scholarship_by_status['Scholarship_holder'] = scholarship_by_status['Scholarship_holder'] * 100
-                
-                fig = px.bar(
-                    scholarship_by_status,
-                    x='Status',
-                    y='Scholarship_holder',
-                    title="Scholarship Holders by Status (%)",
-                    text_auto='.1f',
-                    color='Status',
-                    color_discrete_sequence=['#FF5252', '#4CAF50', '#2196F3']
-                )
-                
-                fig.update_traces(texttemplate='%{y:.1f}%', textposition='outside')
-                fig.update_layout(showlegend=False)
-                
-                st.plotly_chart(fig)
-            else:
-                st.write("No data available for selected filters.")
-        except Exception as e:
-            st.write("Error creating visualization:", e)
+        fig = create_course_success_rate(filtered_data)
+        st.plotly_chart(fig, use_container_width=True)
 
-# Prediction Page
-elif page == "Prediction":
-    st.title('Student Status Prediction')
-    st.markdown("---")
+elif page == "🔮 Prediksi":
+    st.title("🔮 Prediksi Status Mahasiswa")
+    st.write("Masukkan data untuk memprediksi kemungkinan status mahasiswa")
     
-    # Introduction
-    st.markdown("""
-    This tool predicts whether a student is likely to:
-    - **Dropout** (leave without completing the course)
-    - **Enrolled** (continue their studies)
-    - **Graduated** (successfully complete the course)
+    # Ambil input
+    input_data = user_input_features()
     
-    Fill in the form below with student data to get a prediction.
-    """)
-    
-    # Input form in two columns
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Basic Information")
-        application_mode = st.number_input('Application Mode', min_value=0)
-        gender = st.selectbox('Gender', [('Male', 1), ('Female', 0)], format_func=lambda x: x[0])
-        age = st.number_input('Age at Enrollment', min_value=16, max_value=70, value=18)
-        displaced = st.selectbox('Displaced (student living away from home)', [('Yes', 1), ('No', 0)], format_func=lambda x: x[0])
-        scholarship = st.selectbox('Scholarship Holder', [('Yes', 1), ('No', 0)], format_func=lambda x: x[0])
-        debtor = st.selectbox('Debtor', [('Yes', 1), ('No', 0)], format_func=lambda x: x[0])
-        tuition_up_to_date = st.selectbox('Tuition Fees Up to Date', [('Yes', 1), ('No', 0)], format_func=lambda x: x[0])
-    
-    with col2:
-        st.subheader("Academic Information")
-        prev_qualification_grade = st.number_input('Previous Qualification Grade', min_value=0.0, max_value=200.0, value=120.0)
-        admission_grade = st.number_input('Admission Grade', min_value=0.0, max_value=200.0, value=120.0)
+    # Prediksi
+    st.markdown("### 🔮 Hasil Prediksi")
+    if st.button('Prediksi Status Mahasiswa', use_container_width=True):
+        prediction = model.predict(input_data)
+        status_map = {0: 'Dropout', 1: 'Masih Terdaftar', 2: 'Lulus'}
+        prediction_label = status_map.get(prediction[0], "Tidak Diketahui")
         
-        st.markdown("#### First Semester")
-        units_1st_enrolled = st.number_input('1st Semester - Enrolled Units', min_value=0, max_value=20, value=6)
-        units_1st_approved = st.number_input('1st Semester - Approved Units', min_value=0, max_value=20, value=5)
-        grade_1st = st.number_input('1st Semester - Grade', min_value=0.0, max_value=20.0, value=12.0)
+        # Tampilkan hasil dengan warna berbeda berdasarkan prediksi
+        if prediction[0] == 0:  # Dropout
+            st.error(f"### 🚫 Prediksi: DROPOUT")
+            st.info("Mahasiswa ini diprediksi akan dropout. Disarankan untuk memberikan perhatian khusus dan bimbingan.")
+        elif prediction[0] == 1:  # Enrolled
+            st.info(f"### ⏳ Prediksi: MASIH TERDAFTAR")
+            st.success("Mahasiswa ini diprediksi akan tetap terdaftar. Terus pantau perkembangannya.")
+        else:  # Graduated
+            st.success(f"### 🎓 Prediksi: LULUS")
+            st.balloons()
+            st.info("Mahasiswa ini diprediksi akan lulus dengan baik. Pertahankan performa akademiknya.")
         
-        st.markdown("#### Second Semester")
-        units_2nd_enrolled = st.number_input('2nd Semester - Enrolled Units', min_value=0, max_value=20, value=6)
-        units_2nd_approved = st.number_input('2nd Semester - Approved Units', min_value=0, max_value=20, value=5)
-        grade_2nd = st.number_input('2nd Semester - Grade', min_value=0.0, max_value=20.0, value=12.0)
-    
-    # Calculate derived features
-    total_enrolled = units_1st_enrolled + units_2nd_enrolled
-    total_approved = units_1st_approved + units_2nd_approved
-    approval_rate = (total_approved / total_enrolled * 100) if total_enrolled > 0 else 0
-    average_grade = (grade_1st + grade_2nd) / 2 if (grade_1st + grade_2nd > 0) else 0
-    
-    # Create input array for prediction
-    input_data = np.array([[
-        units_2nd_enrolled, units_2nd_approved, grade_2nd,
-        units_1st_enrolled, units_1st_approved, grade_1st,
-        admission_grade, prev_qualification_grade, age,
-        tuition_up_to_date[1], scholarship[1], gender[1], debtor[1],
-        application_mode, displaced[1], total_enrolled, total_approved, approval_rate, average_grade
-    ]])
-    
-    # Show prediction
-    if st.button('Predict Student Status', use_container_width=True):
-        with st.spinner('Predicting...'):
-            prediction = model.predict(input_data)
-            probability = model.predict_proba(input_data)
+        # Tampilkan probabilitas (opsional, jika model mendukung)
+        try:
+            proba = model.predict_proba(input_data)[0]
+            st.markdown("#### Tingkat Kepercayaan Prediksi:")
             
-            status_map = {0: 'Dropout', 1: 'Enrolled', 2: 'Graduated'}
-            prediction_label = status_map.get(prediction[0], "Unknown")
-            
-            # Display result
-            st.markdown("---")
-            st.subheader("Prediction Result")
-            
-            # Prediction box
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col2:
-                st.markdown(f"""
-                <div style='background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center;'>
-                    <h2 style='color: #0066cc;'>Predicted Status: {prediction_label}</h2>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Show probabilities
-            st.markdown("#### Prediction Confidence")
-            proba_df = pd.DataFrame({
-                'Status': ['Dropout', 'Enrolled', 'Graduated'],
-                'Probability': probability[0] * 100
-            })
-            
-            fig = px.bar(
-                proba_df, 
-                x='Status', 
-                y='Probability',
-                text_auto='.1f',
-                color='Status',
-                color_discrete_sequence=['#FF5252', '#4CAF50', '#2196F3']
-            )
-            
-            fig.update_traces(texttemplate='%{y:.1f}%', textposition='outside')
-            fig.update_layout(yaxis_range=[0, 100])
-            
-            st.plotly_chart(fig)
-            
-            # Summary of input
-            with st.expander("View Input Summary"):
-                input_summary = {
-                    'Basic Information': {
-                        'Application Mode': application_mode,
-                        'Gender': gender[0],
-                        'Age': age,
-                        'Displaced': displaced[0],
-                        'Scholarship Holder': scholarship[0],
-                        'Debtor': debtor[0],
-                        'Tuition Up to Date': tuition_up_to_date[0]
-                    },
-                    'Academic Information': {
-                        'Previous Qualification Grade': prev_qualification_grade,
-                        'Admission Grade': admission_grade,
-                        '1st Semester Enrolled Units': units_1st_enrolled,
-                        '1st Semester Approved Units': units_1st_approved,
-                        '1st Semester Grade': grade_1st,
-                        '2nd Semester Enrolled Units': units_2nd_enrolled,
-                        '2nd Semester Approved Units': units_2nd_approved,
-                        '2nd Semester Grade': grade_2nd
-                    },
-                    'Calculated Metrics': {
-                        'Total Enrolled Units': total_enrolled,
-                        'Total Approved Units': total_approved,
-                        'Approval Rate': f"{approval_rate:.2f}%",
-                        'Average Grade': average_grade
-                    }
-                }
-                
-                for category, items in input_summary.items():
-                    st.write(f"**{category}**")
-                    for key, value in items.items():
-                        st.write(f"- {key}: {value}")
-    else:
-        st.info("Fill in the form and click 'Predict Student Status' to get a prediction.")
+            col_prob1, col_prob2, col_prob3 = st.columns(3)
+            with col_prob1:
+                st.progress(proba[0])
+                st.caption(f"Dropout: {proba[0]:.1%}")
+            with col_prob2:
+                st.progress(proba[1])
+                st.caption(f"Masih Terdaftar: {proba[1]:.1%}")
+            with col_prob3:
+                st.progress(proba[2])
+                st.caption(f"Lulus: {proba[2]:.1%}")
+        except:
+            pass

@@ -120,7 +120,7 @@ Business dashboard yang telah dibuat menggunakan Looker Studio dengan dashboard 
 2. Running Model: Untuk menjalankan model prediksi, gunakan script Python yang telah disediakan. Contoh untuk melakukan prediksi dengan model Neural Network:
 
 ```
-python app.py
+streamlit run app.py
 ```
 
 4. Atau bisa klik [link ini](https://data-science-project-solving-educational-institution-problems.streamlit.app/) untuk mengakses aplikasi secara real-time dari streamlit

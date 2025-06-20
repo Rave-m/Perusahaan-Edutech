@@ -318,19 +318,19 @@ def user_input_features():
 
     # Create a DataFrame with feature names to avoid RandomForest feature names error
     feature_names = [
-        'Curricular_units_2nd_sem_enrolled', 'Curricular_units_2nd_sem_approved', 'Curricular_units_2nd_sem_grade',
+        'Application_mode', 'Debtor', 'Tuition_fees_up_to_date', 'Gender', 'Scholarship_holder', 
+        'Age_at_enrollment', 'Previous_qualification_grade', 'Admission_grade', 'Displaced',
         'Curricular_units_1st_sem_enrolled', 'Curricular_units_1st_sem_approved', 'Curricular_units_1st_sem_grade',
-        'Admission_grade', 'Previous_qualification_grade', 'Age_at_enrollment',
-        'Tuition_fees_up_to_date', 'Scholarship_holder', 'Gender', 'Debtor',
-        'Application_mode', 'Displaced', 'Total_enrolled_units', 'Total_approved_unit', 'Approval_rate', 'Average_grade'
+        'Curricular_units_2nd_sem_enrolled', 'Curricular_units_2nd_sem_approved', 'Curricular_units_2nd_sem_grade', 
+        'Total_enrolled_units', 'Total_approved_unit', 'Approval_rate', 'Average_grade'
     ]
     
     input_values = [[
-        Curricular_units_2nd_sem_enrolled, Curricular_units_2nd_sem_approved, Curricular_units_2nd_sem_grade,
+        Application_mode, Debtor, Tuition_fees_up_to_date, Gender, Scholarship_holder,
+        Age_at_enrollment, Previous_qualification_grade, Admission_grade, Displaced,
         Curricular_units_1st_sem_enrolled, Curricular_units_1st_sem_approved, Curricular_units_1st_sem_grade,
-        Admission_grade, Previous_qualification_grade, Age_at_enrollment,
-        Tuition_fees_up_to_date, Scholarship_holder, Gender, Debtor,
-        Application_mode, Displaced, Total_enrolled_units, Total_approved_unit, Approval_rate, Average_grade
+        Curricular_units_2nd_sem_enrolled, Curricular_units_2nd_sem_approved, Curricular_units_2nd_sem_grade,
+        Total_enrolled_units, Total_approved_unit, Approval_rate, Average_grade
     ]]
     
     features = pd.DataFrame(input_values, columns=feature_names)
